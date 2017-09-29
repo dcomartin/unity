@@ -6,6 +6,7 @@ using System.Linq;
 using System.Collections.Generic;
 using Unity.ObjectBuilder;
 using System.Globalization;
+using Unity.Container.Registration;
 
 namespace Unity
 {
@@ -14,17 +15,19 @@ namespace Unity
     {
         #region Fields 
 
-        private readonly UnityContainer parent;
+        private readonly UnityContainer _parent;
+        private readonly IDictionary<IBuildKey, IBuilderPolicy[]> _registrations = new Dictionary<IBuildKey, IBuilderPolicy[]>();
+        private readonly StagedStrategyChain<UnityBuildStage> _strategies;
 
-        private LifetimeContainer lifetimeContainer;
-        private StagedStrategyChain<UnityBuildStage> strategies;
-        private StagedStrategyChain<UnityBuildStage> buildPlanStrategies;
-        private PolicyList policies;
-        private NamedTypesRegistry registeredNames;
-        private List<UnityContainerExtension> extensions;
+        private LifetimeContainer _lifetimeContainer;
+        private readonly StagedStrategyChain<UnityBuildStage> _buildPlanStrategies;
+        private readonly PolicyList _policies;
+        private readonly NamedTypesRegistry _registeredNames;
+        private readonly List<UnityContainerExtension> _extensions;
+        private readonly ExtensionContext _extensionsContext;
 
-        private IStrategyChain cachedStrategies;
-        private object cachedStrategiesLock;
+        private IStrategyChain _cachedStrategies;
+        private readonly object _cachedStrategiesLock;
 
         private event EventHandler<RegisterEventArgs> Registering;
         private event EventHandler<RegisterInstanceEventArgs> RegisteringInstance;
@@ -47,19 +50,33 @@ namespace Unity
         /// <summary>
         /// Create a <see cref="UnityContainer"/> with the given parent container.
         /// </summary>
-        /// <param name="parentContainer">The parent <see cref="UnityContainer"/>. The current object
+        /// <param name="parent">The parent <see cref="UnityContainer"/>. The current object
         /// will apply its own settings first, and then check the parent for additional ones.</param>
-        private UnityContainer(UnityContainer parentContainer)
+        private UnityContainer(UnityContainer parent)
         {
-            parent = parentContainer;
+            _parent = parent;
 
             Registering = OnRegister;
+            Registering += OnTypeRegistration;
+
             RegisteringInstance = OnRegisterInstance;
+            RegisteringInstance += OnInstanceRegistration;
 
-            if (parent != null)
-                parent.lifetimeContainer.Add(this);
+            if (_parent != null)
+                _parent._lifetimeContainer.Add(this);
 
-            InitializeBuilderState();
+            _registeredNames = new NamedTypesRegistry(ParentNameRegistry);
+            _extensions = new List<UnityContainerExtension>();
+            _extensionsContext = new ExtensionContextImpl(this);
+
+            _lifetimeContainer = new LifetimeContainer();
+            _strategies = new StagedStrategyChain<UnityBuildStage>(ParentStrategies);
+            _buildPlanStrategies = new StagedStrategyChain<UnityBuildStage>(ParentBuildPlanStrategies);
+            _policies = new PolicyList(ParentPolicies);
+            _policies.Set<IRegisteredNamesPolicy>(new RegisteredNamesPolicy(_registeredNames), null);
+
+            _cachedStrategies = null;
+            _cachedStrategiesLock = new object();
 
             RegisterInstance(typeof(IUnityContainer), null, this, new ContainerLifetimeManager());
         }
@@ -72,62 +89,94 @@ namespace Unity
         private void InitializeDefaultPolicies()
         {
             // Main strategy chain
-            strategies.AddNew<LifetimeStrategy>(UnityBuildStage.Lifetime);
-            strategies.AddNew<BuildKeyMappingStrategy>(UnityBuildStage.TypeMapping);
-
-            strategies.AddNew<ArrayResolutionStrategy>(UnityBuildStage.Creation);
-            strategies.AddNew<BuildPlanStrategy>(UnityBuildStage.Creation);
+            _strategies.AddNew<LifetimeStrategy>(UnityBuildStage.Lifetime)
+                       .ContainerContext = _extensionsContext;  
+            _strategies.AddNew<BuildKeyMappingStrategy>(UnityBuildStage.TypeMapping);
+            _strategies.AddNew<ArrayResolutionStrategy>(UnityBuildStage.Creation);
+            _strategies.AddNew<BuildPlanStrategy>(UnityBuildStage.Creation);
 
             // Build plan strategy chain
-            buildPlanStrategies.AddNew<DynamicMethodConstructorStrategy>(UnityBuildStage.Creation);
-            buildPlanStrategies.AddNew<DynamicMethodPropertySetterStrategy>(UnityBuildStage.Initialization);
-            buildPlanStrategies.AddNew<DynamicMethodCallStrategy>(UnityBuildStage.Initialization);
+            _buildPlanStrategies.AddNew<DynamicMethodConstructorStrategy>(UnityBuildStage.Creation);
+            _buildPlanStrategies.AddNew<DynamicMethodPropertySetterStrategy>(UnityBuildStage.Initialization);
+            _buildPlanStrategies.AddNew<DynamicMethodCallStrategy>(UnityBuildStage.Initialization);
 
             // Policies - mostly used by the build plan strategies
-            policies.SetDefault<IConstructorSelectorPolicy>(new DefaultUnityConstructorSelectorPolicy());
-            policies.SetDefault<IPropertySelectorPolicy>(new DefaultUnityPropertySelectorPolicy());
-            policies.SetDefault<IMethodSelectorPolicy>(new DefaultUnityMethodSelectorPolicy());
+            _policies.SetDefault<IConstructorSelectorPolicy>(new DefaultUnityConstructorSelectorPolicy());
+            _policies.SetDefault<IPropertySelectorPolicy>(new DefaultUnityPropertySelectorPolicy());
+            _policies.SetDefault<IMethodSelectorPolicy>(new DefaultUnityMethodSelectorPolicy());
 
-            policies.SetDefault<IBuildPlanCreatorPolicy>(new DynamicMethodBuildPlanCreatorPolicy(buildPlanStrategies));
+            _policies.SetDefault<IBuildPlanCreatorPolicy>(new DynamicMethodBuildPlanCreatorPolicy(_buildPlanStrategies));
 
-            policies.Set<IBuildPlanPolicy>(new DeferredResolveBuildPlanPolicy(), typeof(Func<>));
-            policies.Set<ILifetimePolicy>(new PerResolveLifetimeManager(), typeof(Func<>));
+            _policies.Set<IBuildPlanPolicy>(new DeferredResolveBuildPlanPolicy(), typeof(Func<>));
+            _policies.Set<ILifetimePolicy>(new PerResolveLifetimeManager(), typeof(Func<>));
 
-            policies.Set<IBuildPlanCreatorPolicy>(new LazyDynamicMethodBuildPlanCreatorPolicy(), typeof(Lazy<>));
-            policies.Set<IBuildPlanCreatorPolicy>(new EnumerableDynamicMethodBuildPlanCreatorPolicy(), typeof(IEnumerable<>));
+            _policies.Set<IBuildPlanCreatorPolicy>(new LazyDynamicMethodBuildPlanCreatorPolicy(), typeof(Lazy<>));
+            _policies.Set<IBuildPlanCreatorPolicy>(new EnumerableDynamicMethodBuildPlanCreatorPolicy(), typeof(IEnumerable<>));
         }
 
         private void OnRegister(object sender, RegisterEventArgs e)
         {
-            registeredNames.RegisterType(e.TypeFrom ?? e.TypeTo, e.Name);
+            _registeredNames.RegisterType(e.TypeFrom ?? e.TypeTo, e.Name);
+
             if (e.TypeFrom != null)
             {
                 if (e.TypeFrom.GetTypeInfo().IsGenericTypeDefinition && e.TypeTo.GetTypeInfo().IsGenericTypeDefinition)
                 {
-                    policies.Set<IBuildKeyMappingPolicy>(
+                    _policies.Set<IBuildKeyMappingPolicy>(
                         new GenericTypeBuildKeyMappingPolicy(new NamedTypeBuildKey(e.TypeTo, e.Name)),
                         new NamedTypeBuildKey(e.TypeFrom, e.Name));
                 }
                 else
                 {
-                    policies.Set<IBuildKeyMappingPolicy>(
+                    _policies.Set<IBuildKeyMappingPolicy>(
                         new BuildKeyMappingPolicy(new NamedTypeBuildKey(e.TypeTo, e.Name)),
                         new NamedTypeBuildKey(e.TypeFrom, e.Name));
                 }
             }
+
             if (e.LifetimeManager != null)
             {
                 SetLifetimeManager(e.TypeFrom ?? e.TypeTo, e.Name, e.LifetimeManager);
             }
+
+
+            if (null != e.InjectionMembers && e.InjectionMembers.Length > 0)
+            {
+                ClearExistingBuildPlan(e.TypeTo, e.Name);
+                foreach (var member in e.InjectionMembers)
+                {
+                    member.AddPolicies(e.TypeFrom, e.TypeTo, e.Name, _policies);
+                }
+            }
+        }
+
+        private void OnTypeRegistration(object sender, RegisterEventArgs e)
+        {
+            var type = e.TypeFrom ?? e.TypeTo;
+
+            _registrations[new NamedTypeBuildKey(type, e.Name)] = 
+                GetStrategies().OfType<IRegisterTypes>()
+                               .Select(s => s.OnRegisterType(e.TypeFrom, e.TypeTo, e.Name, e.LifetimeManager, e.InjectionMembers))
+                               .SelectMany(p => p)
+                               .ToArray();
         }
 
         private void OnRegisterInstance(object sender, RegisterInstanceEventArgs e)
         {
-            registeredNames.RegisterType(e.RegisteredType, e.Name);
+            _registeredNames.RegisterType(e.RegisteredType, e.Name);
             SetLifetimeManager(e.RegisteredType, e.Name, e.LifetimeManager);
             NamedTypeBuildKey identityKey = new NamedTypeBuildKey(e.RegisteredType, e.Name);
-            policies.Set<IBuildKeyMappingPolicy>(new BuildKeyMappingPolicy(identityKey), identityKey);
+            _policies.Set<IBuildKeyMappingPolicy>(new BuildKeyMappingPolicy(identityKey), identityKey);
             e.LifetimeManager.SetValue(e.Instance);
+        }
+
+        private void OnInstanceRegistration(object sender, RegisterInstanceEventArgs e)
+        {
+            _registrations[new NamedTypeBuildKey(e.RegisteredType, e.Name)] =
+                GetStrategies().OfType<IRegisterInstances>()
+                               .Select(s => s.OnRegisterInstance(e.RegisteredType, e.Name, e.Instance, e.LifetimeManager))
+                               .SelectMany(p => p)
+                               .ToArray();
         }
 
         #endregion
@@ -142,7 +191,7 @@ namespace Unity
             try
             {
                 context =
-                    new BuilderContext(this, GetStrategies(), lifetimeContainer, policies, new NamedTypeBuildKey(t, name), existing);
+                    new BuilderContext(this, GetStrategies(), _lifetimeContainer, _policies, new NamedTypeBuildKey(t, name), existing);
                 context.AddResolverOverrides(resolverOverrides);
 
                 if (t.GetTypeInfo().IsGenericTypeDefinition)
@@ -163,58 +212,43 @@ namespace Unity
 
         private IStrategyChain GetStrategies()
         {
-            IStrategyChain buildStrategies = cachedStrategies;
+            IStrategyChain buildStrategies = _cachedStrategies;
             if (buildStrategies == null)
             {
-                lock (cachedStrategiesLock)
+                lock (_cachedStrategiesLock)
                 {
-                    if (cachedStrategies == null)
+                    if (_cachedStrategies == null)
                     {
-                        buildStrategies = strategies.MakeStrategyChain();
-                        cachedStrategies = buildStrategies;
+                        buildStrategies = _strategies.MakeStrategyChain();
+                        _cachedStrategies = buildStrategies;
                     }
                     else
                     {
-                        buildStrategies = cachedStrategies;
+                        buildStrategies = _cachedStrategies;
                     }
                 }
             }
             return buildStrategies;
         }
 
-        private void InitializeBuilderState()
-        {
-            registeredNames = new NamedTypesRegistry(ParentNameRegistry);
-            extensions = new List<UnityContainerExtension>();
-
-            lifetimeContainer = new LifetimeContainer();
-            strategies = new StagedStrategyChain<UnityBuildStage>(ParentStrategies);
-            buildPlanStrategies = new StagedStrategyChain<UnityBuildStage>(ParentBuildPlanStrategies);
-            policies = new PolicyList(ParentPolicies);
-            policies.Set<IRegisteredNamesPolicy>(new RegisteredNamesPolicy(registeredNames), null);
-
-            cachedStrategies = null;
-            cachedStrategiesLock = new object();
-        }
-
         private StagedStrategyChain<UnityBuildStage> ParentStrategies
         {
-            get { return parent == null ? null : parent.strategies; }
+            get { return _parent == null ? null : _parent._strategies; }
         }
 
         private StagedStrategyChain<UnityBuildStage> ParentBuildPlanStrategies
         {
-            get { return parent == null ? null : parent.buildPlanStrategies; }
+            get { return _parent == null ? null : _parent._buildPlanStrategies; }
         }
 
         private PolicyList ParentPolicies
         {
-            get { return parent == null ? null : parent.policies; }
+            get { return _parent == null ? null : _parent._policies; }
         }
 
         private NamedTypesRegistry ParentNameRegistry
         {
-            get { return parent == null ? null : parent.registeredNames; }
+            get { return _parent == null ? null : _parent._registeredNames; }
         }
 
         #endregion
@@ -230,17 +264,17 @@ namespace Unity
             }
             if (lifetimeType.GetTypeInfo().IsGenericTypeDefinition)
             {
-                LifetimeManagerFactory factory = new LifetimeManagerFactory(new ExtensionContextImpl(this), lifetimeManager.GetType());
-                policies.Set<ILifetimeFactoryPolicy>(factory, new NamedTypeBuildKey(lifetimeType, name));
+                LifetimeManagerFactory factory = new LifetimeManagerFactory(_extensionsContext, lifetimeManager.GetType());
+                _policies.Set<ILifetimeFactoryPolicy>(factory, new NamedTypeBuildKey(lifetimeType, name));
             }
             else
             {
                 lifetimeManager.InUse = true;
-                policies.Set<ILifetimePolicy>(lifetimeManager,
+                _policies.Set<ILifetimePolicy>(lifetimeManager,
                     new NamedTypeBuildKey(lifetimeType, name));
                 if (lifetimeManager is IDisposable)
                 {
-                    lifetimeContainer.Add(lifetimeManager);
+                    _lifetimeContainer.Add(lifetimeManager);
                 }
             }
         }
@@ -280,18 +314,18 @@ namespace Unity
         private void ClearExistingBuildPlan(Type typeToInject, string name)
         {
             var buildKey = new NamedTypeBuildKey(typeToInject, name);
-            DependencyResolverTrackerPolicy.RemoveResolvers(policies, buildKey);
-            policies.Set<IBuildPlanPolicy>(new OverriddenBuildPlanMarkerPolicy(), buildKey);
+            DependencyResolverTrackerPolicy.RemoveResolvers(_policies, buildKey);
+            _policies.Set<IBuildPlanPolicy>(new OverriddenBuildPlanMarkerPolicy(), buildKey);
         }
 
         private void FillTypeRegistrationDictionary(IDictionary<Type, List<string>> typeRegistrations)
         {
-            if (parent != null)
+            if (_parent != null)
             {
-                parent.FillTypeRegistrationDictionary(typeRegistrations);
+                _parent.FillTypeRegistrationDictionary(typeRegistrations);
             }
 
-            foreach (Type t in registeredNames.RegisteredTypes)
+            foreach (Type t in _registeredNames.RegisteredTypes)
             {
                 if (!typeRegistrations.ContainsKey(t))
                 {
@@ -299,7 +333,7 @@ namespace Unity
                 }
 
                 typeRegistrations[t] =
-                    (typeRegistrations[t].Concat(registeredNames.GetKeys(t))).Distinct().ToList();
+                    (typeRegistrations[t].Concat(_registeredNames.GetKeys(t))).Distinct().ToList();
             }
         }
         
@@ -333,23 +367,23 @@ namespace Unity
         {
             if (disposing)
             {
-                if (lifetimeContainer != null)
+                if (_lifetimeContainer != null)
                 {
                     // Avoid infinite loop when someone
                     //  registers something which would end up 
                     //  disposing this container (e.g. container.RegisterInsance(container))
-                    LifetimeContainer lifetimeContainerCopy = lifetimeContainer;
-                    lifetimeContainer = null;
+                    LifetimeContainer lifetimeContainerCopy = _lifetimeContainer;
+                    _lifetimeContainer = null;
                     lifetimeContainerCopy.Dispose();
 
-                    if (parent != null && parent.lifetimeContainer != null)
+                    if (_parent != null && _parent._lifetimeContainer != null)
                     {
-                        parent.lifetimeContainer.Remove(this);
+                        _parent._lifetimeContainer.Remove(this);
                     }
                 }
 
-                extensions.OfType<IDisposable>().ForEach(ex => ex.Dispose());
-                extensions.Clear();
+                _extensions.OfType<IDisposable>().ForEach(ex => ex.Dispose());
+                _extensions.Clear();
             }
         }
 
@@ -382,27 +416,27 @@ namespace Unity
 
             public override StagedStrategyChain<UnityBuildStage> Strategies
             {
-                get { return this.container.strategies; }
+                get { return this.container._strategies; }
             }
 
             public override StagedStrategyChain<UnityBuildStage> BuildPlanStrategies
             {
-                get { return this.container.buildPlanStrategies; }
+                get { return this.container._buildPlanStrategies; }
             }
 
             public override IPolicyList Policies
             {
-                get { return this.container.policies; }
+                get { return this.container._policies; }
             }
 
             public override ILifetimeContainer Lifetime
             {
-                get { return this.container.lifetimeContainer; }
+                get { return this.container._lifetimeContainer; }
             }
 
             public override void RegisterNamedType(Type t, string name)
             {
-                this.container.registeredNames.RegisterType(t, name);
+                this.container._registeredNames.RegisterType(t, name);
             }
 
             public override event EventHandler<RegisterEventArgs> Registering

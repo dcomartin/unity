@@ -10,7 +10,7 @@ namespace Unity
     /// The <see cref="ExtensionContext"/> class provides the means for extension objects
     /// to manipulate the internal state of the <see cref="UnityContainer"/>.
     /// </summary>
-    public abstract class ExtensionContext
+    public abstract class ExtensionContext : IContainerContext
     {
         /// <summary>
         /// The container that this context is associated with.

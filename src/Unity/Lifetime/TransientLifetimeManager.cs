@@ -10,6 +10,10 @@ namespace Unity
     /// </summary>
     public class TransientLifetimeManager : LifetimeManager
     {
+        private static TransientLifetimeManager _instance = new TransientLifetimeManager();
+
+        internal override bool InUse { get => false; set { } }
+
         /// <summary>
         /// Retrieve a value from the backing store associated with this Lifetime policy.
         /// </summary>
@@ -33,5 +37,7 @@ namespace Unity
         public override void RemoveValue()
         {
         }
+
+        public static TransientLifetimeManager Instance => _instance;
     }
 }

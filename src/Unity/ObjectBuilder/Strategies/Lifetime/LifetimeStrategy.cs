@@ -1,8 +1,11 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved. See License.txt in the project root for license information.
 
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Unity;
+using Unity.Container.Registration;
+using Unity.Properties;
 using Unity.Utility;
 
 namespace ObjectBuilder2
@@ -13,10 +16,11 @@ namespace ObjectBuilder2
     /// has already been created and to update or remove that
     /// object from some backing store.
     /// </summary>
-    public class LifetimeStrategy : BuilderStrategy
+    public class LifetimeStrategy : BuilderUpStrategy, IRegisterTypes, IRegisterInstances
     {
         private readonly object genericLifetimeManagerLock = new object();
-        private static readonly TransientLifetimeManager TransientLifetime = new TransientLifetimeManager();
+
+        #region BuilderStrategy
 
         /// <summary>
         /// Called during the chain of responsibility for a build operation. The
@@ -82,7 +86,7 @@ namespace ObjectBuilder2
 
             if (policy == null)
             {
-                policy = TransientLifetime;
+                policy = TransientLifetimeManager.Instance;
                 context.PersistentPolicies.Set<ILifetimePolicy>(policy, context.BuildKey);
             }
 
@@ -122,5 +126,36 @@ namespace ObjectBuilder2
 
             return null;
         }
+
+        #endregion
+
+
+        #region Registerations
+
+        public IEnumerable<IBuilderPolicy> OnRegisterType(Type from, Type to, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
+        {
+            if (lifetimeManager.InUse)
+                throw new InvalidOperationException(Resources.LifetimeManagerInUse);
+
+            return new[] { lifetimeManager ?? TransientLifetimeManager.Instance };
+        }
+
+        public IEnumerable<IBuilderPolicy> OnRegisterInstance(Type type, string name, object instance, LifetimeManager lifetimeManager)
+        {
+            var manager = lifetimeManager ?? new ContainerControlledLifetimeManager();
+
+            if (manager.InUse)
+                throw new InvalidOperationException(Resources.LifetimeManagerInUse);
+
+            manager.InUse = true;
+            manager.SetValue(instance);
+
+            if (manager is ContainerControlledLifetimeManager)
+                ContainerContext.Lifetime.Add(manager);
+
+            return new[] { manager };
+        }
+
+        #endregion
     }
 }

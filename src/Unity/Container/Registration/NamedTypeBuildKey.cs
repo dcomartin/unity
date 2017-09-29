@@ -2,6 +2,7 @@
 
 using System;
 using System.Globalization;
+using Unity.Container.Registration;
 
 namespace ObjectBuilder2
 {
@@ -9,10 +10,11 @@ namespace ObjectBuilder2
     /// Build key used to combine a type object with a string name. Used by
     /// ObjectBuilder to indicate exactly what is being built.
     /// </summary>
-    public class NamedTypeBuildKey
+    public class NamedTypeBuildKey : IBuildKey
     {
-        private readonly Type type;
-        private readonly string name;
+        private readonly int _hash;
+        private readonly Type _type;
+        private readonly string _name;
 
         /// <summary>
         /// Create a new <see cref="NamedTypeBuildKey"/> instance with the given
@@ -22,8 +24,9 @@ namespace ObjectBuilder2
         /// <param name="name">Key to use to look up type mappings and singletons.</param>
         public NamedTypeBuildKey(Type type, string name)
         {
-            this.type = type;
-            this.name = !string.IsNullOrEmpty(name) ? name : null;
+            _type = type;
+            _name = !string.IsNullOrEmpty(name) ? name : null;
+            _hash = ((_type?.GetHashCode() ?? 0) + 37) ^ ((_name?.GetHashCode() ?? 0) + 17);
         }
 
         /// <summary>
@@ -65,7 +68,7 @@ namespace ObjectBuilder2
         /// <value>The type to build.</value>
         public Type Type
         {
-            get { return type; }
+            get { return _type; }
         }
 
         /// <summary>
@@ -74,7 +77,7 @@ namespace ObjectBuilder2
         /// <remarks>The name to use when building.</remarks>
         public string Name
         {
-            get { return name; }
+            get { return _name; }
         }
 
         /// <summary>
@@ -87,12 +90,7 @@ namespace ObjectBuilder2
         /// <returns>True if the two keys are equal, false if not.</returns>
         public override bool Equals(object obj)
         {
-            var other = obj as NamedTypeBuildKey;
-            if (other == null)
-            {
-                return false;
-            }
-            return this == other;
+            return this == (obj as NamedTypeBuildKey);
         }
 
         /// <summary>
@@ -101,9 +99,7 @@ namespace ObjectBuilder2
         /// <returns>A hash code.</returns>
         public override int GetHashCode()
         {
-            int typeHash = type == null ? 0 : type.GetHashCode();
-            int nameHash = name == null ? 0 : name.GetHashCode();
-            return (typeHash + 37) ^ (nameHash + 17);
+            return _hash;
         }
 
         /// <summary>
@@ -116,19 +112,7 @@ namespace ObjectBuilder2
         /// <returns>True if the values of the keys are the same, else false.</returns>
         public static bool operator ==(NamedTypeBuildKey left, NamedTypeBuildKey right)
         {
-            var leftIsNull = ReferenceEquals(left, null);
-            var rightIsNull = ReferenceEquals(right, null);
-            if (leftIsNull && rightIsNull)
-            {
-                return true;
-            }
-            if (leftIsNull || rightIsNull)
-            {
-                return false;
-            }
-
-            return left.type == right.type &&
-                   string.Compare(left.name, right.name, StringComparison.Ordinal) == 0;
+            return (left?.GetHashCode() ?? 0) == (right?.GetHashCode() ?? 0);
         }
 
         /// <summary>
@@ -142,7 +126,7 @@ namespace ObjectBuilder2
         /// <returns>false if the values of the keys are the same, else true.</returns>
         public static bool operator !=(NamedTypeBuildKey left, NamedTypeBuildKey right)
         {
-            return !(left == right);
+            return (left?.GetHashCode() ?? 0) != (right?.GetHashCode() ?? 0);
         }
 
         /// <summary>
@@ -151,7 +135,7 @@ namespace ObjectBuilder2
         /// <returns>A readable string representation of the build key.</returns>
         public override string ToString()
         {
-            return string.Format(CultureInfo.InvariantCulture, "Build Key[{0}, {1}]", type, name ?? "null");
+            return string.Format(CultureInfo.InvariantCulture, "Build Key[{0}, {1}]", _type, _name ?? "null");
         }
     }
 

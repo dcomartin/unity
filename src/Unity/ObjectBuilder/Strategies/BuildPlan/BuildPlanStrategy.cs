@@ -1,5 +1,10 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved. See License.txt in the project root for license information.
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Unity;
+using Unity.Container.Registration;
 using Unity.Utility;
 
 namespace ObjectBuilder2
@@ -9,7 +14,7 @@ namespace ObjectBuilder2
     /// in the current context. If it exists, it invokes it, otherwise
     /// it creates one and stores it for later, and invokes it.
     /// </summary>
-    public class BuildPlanStrategy : BuilderStrategy
+    public class BuildPlanStrategy : BuilderStrategy, IRegisterTypes
     {
         /// <summary>
         /// Called during the chain of responsibility for a build operation.
@@ -38,5 +43,20 @@ namespace ObjectBuilder2
                 plan.BuildUp(context);
             }
         }
+
+
+        #region Registerations
+
+        public IEnumerable<IBuilderPolicy> OnRegisterType(Type from, Type to, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
+        {
+            if (null == injectionMembers || 0 == injectionMembers.Length)
+                return Enumerable.Empty<IBuilderPolicy>();
+
+            // TODO: Replace with real implementation
+            return Enumerable.Empty<IBuilderPolicy>();
+        }
+
+        #endregion
+
     }
 }

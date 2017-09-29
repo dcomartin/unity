@@ -1,6 +1,10 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved. See License.txt in the project root for license information.
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Unity;
+using Unity.Container.Registration;
 using Unity.Utility;
 
 namespace ObjectBuilder2
@@ -8,7 +12,7 @@ namespace ObjectBuilder2
     /// <summary>
     /// Represents a strategy for mapping build keys in the build up operation.
     /// </summary>
-    public class BuildKeyMappingStrategy : BuilderStrategy
+    public class BuildKeyMappingStrategy : BuilderStrategy, IRegisterTypes
     {
         /// <summary>
         /// Called during the chain of responsibility for a build operation.  
@@ -38,5 +42,17 @@ namespace ObjectBuilder2
                 context.BuildComplete = true;
             }
         }
+
+
+        #region Registerations
+
+        public IEnumerable<IBuilderPolicy> OnRegisterType(Type from, Type to, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
+        {
+            // TODO: Replace with real implementation
+            return Enumerable.Empty<IBuilderPolicy>();
+        }
+
+        #endregion
+
     }
 }

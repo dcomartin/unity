@@ -10,20 +10,16 @@ namespace Unity
     /// </summary>
     public abstract class LifetimeManager : ILifetimePolicy
     {
-        // LifetimeManagers should not be reused - there is one manager per instance
-        // being managed. This flag is used to ensure that the lifetime manager
+        // LifetimeManagers should not be reused (with exception of TransientLifetimemanager) 
+        // - there is one manager per instance being managed. 
+        // This flag is used to ensure that the lifetime manager
         // cannot be reused, and will cause the container to throw an exception
         // in that case.
 
-        private bool inUse;
-
         // Get or set the InUse flag. Internal because it should only be touched from
         // the Register methods in the container.
-        internal bool InUse
-        {
-            get { return inUse; }
-            set { inUse = value; }
-        }
+        internal virtual bool InUse { get; set; }
+
 
         #region ILifetimePolicy Members
 

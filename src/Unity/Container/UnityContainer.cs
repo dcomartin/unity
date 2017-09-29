@@ -3,11 +3,8 @@
 using System;
 using System.Reflection;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using ObjectBuilder2;
-using Unity.ObjectBuilder;
-using Unity.Properties;
 using Guard = Unity.Utility.Guard;
 
 namespace Unity
@@ -32,29 +29,17 @@ namespace Unity
         /// <returns>The <see cref="UnityContainer"/> object that this method was called on (this in C#, Me in Visual Basic).</returns>
         public IUnityContainer RegisterType(Type from, Type to, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
         {
-            Guard.ArgumentNotNull(to, "to");
-            Guard.ArgumentNotNull(injectionMembers, "injectionMembers");
+            Type typeTo = to ?? throw new ArgumentNullException(nameof(to));
+            var registration = !string.IsNullOrEmpty(name) ? name : null;
 
-            if (string.IsNullOrEmpty(name))
+            if (from != null && !from.GetTypeInfo().IsGenericType && 
+                                !typeTo.GetTypeInfo().IsGenericType)
             {
-                name = null;
+                Guard.TypeIsAssignable(from, typeTo, nameof(from));
             }
 
-            if (from != null && !from.GetTypeInfo().IsGenericType && !to.GetTypeInfo().IsGenericType)
-            {
-                Guard.TypeIsAssignable(from, to, "from");
-            }
+            Registering(this, new RegisterEventArgs(from, typeTo, registration, lifetimeManager, injectionMembers));
 
-            Registering(this, new RegisterEventArgs(from, to, name, lifetimeManager));
-
-            if (injectionMembers.Length > 0)
-            {
-                ClearExistingBuildPlan(to, name);
-                foreach (var member in injectionMembers)
-                {
-                    member.AddPolicies(from, to, name, policies);
-                }
-            }
             return this;
         }
 
@@ -80,14 +65,13 @@ namespace Unity
         /// <returns>The <see cref="UnityContainer"/> object that this method was called on (this in C#, Me in Visual Basic).</returns>
         public IUnityContainer RegisterInstance(Type t, string name, object instance, LifetimeManager lifetime)
         {
-            Guard.ArgumentNotNull(instance, "instance");
-            Guard.ArgumentNotNull(lifetime, "lifetime");
             Guard.InstanceIsAssignable(t, instance, "instance");
+
             RegisteringInstance(this,
                                 new RegisterInstanceEventArgs(t,
-                                                              instance,
+                                                              instance ?? throw new ArgumentNullException(nameof(instance)),
                                                               name,
-                                                              lifetime));
+                                                              lifetime ?? throw new ArgumentNullException(nameof(lifetime))));
             return this;
         }
 
@@ -174,7 +158,7 @@ namespace Unity
                 Guard.ArgumentNotNull(o, "o");
 
                 context =
-                    new BuilderContext(this, GetStrategies().Reverse(), lifetimeContainer, policies, null, o);
+                    new BuilderContext(this, GetStrategies().Reverse(), _lifetimeContainer, _policies, null, o);
                 context.Strategies.ExecuteTearDown(context);
             }
             catch (Exception ex)
@@ -195,13 +179,13 @@ namespace Unity
         /// <returns>The <see cref="UnityContainer"/> object that this method was called on (this in C#, Me in Visual Basic).</returns>
         public IUnityContainer AddExtension(UnityContainerExtension extension)
         {
-            Unity.Utility.Guard.ArgumentNotNull(extensions, "extensions");
+            Unity.Utility.Guard.ArgumentNotNull(_extensions, "extensions");
 
-            extensions.Add(extension);
-            extension.InitializeExtension(new ExtensionContextImpl(this));
-            lock (cachedStrategiesLock)
+            _extensions.Add(extension);
+            extension.InitializeExtension(_extensionsContext);
+            lock (_cachedStrategiesLock)
             {
-                cachedStrategies = null;
+                _cachedStrategies = null;
             }
             return this;
         }
@@ -217,7 +201,7 @@ namespace Unity
         /// <returns>The requested extension's configuration interface, or null if not found.</returns>
         public object Configure(Type configurationInterface)
         {
-            return extensions.Where(ex => configurationInterface.GetTypeInfo().IsAssignableFrom(ex.GetType().GetTypeInfo())).FirstOrDefault();
+            return _extensions.Where(ex => configurationInterface.GetTypeInfo().IsAssignableFrom(ex.GetType().GetTypeInfo())).FirstOrDefault();
         }
 
         /// <summary>
@@ -238,7 +222,7 @@ namespace Unity
         /// <returns>The <see cref="UnityContainer"/> object that this method was called on (this in C#, Me in Visual Basic).</returns>
         public IUnityContainer RemoveAllExtensions()
         {
-            var toRemove = new List<UnityContainerExtension>(extensions);
+            var toRemove = new List<UnityContainerExtension>(_extensions);
             toRemove.Reverse();
             foreach (UnityContainerExtension extension in toRemove)
             {
@@ -250,17 +234,21 @@ namespace Unity
                 }
             }
 
-            extensions.Clear();
+            _extensions.Clear();
 
             // Reset our policies, strategies, and registered names to reset to "zero"
-            strategies.Clear();
-            policies.ClearAll();
-            registeredNames.Clear();
+            _strategies.Clear();
+            _policies.ClearAll();
+            _registeredNames.Clear();
 
             // Restore defaults
             Registering = OnRegister;
+            Registering += OnTypeRegistration;
             RegisteringInstance = OnRegisterInstance;
-            InitializeDefaultPolicies();
+            RegisteringInstance += OnInstanceRegistration;
+
+            if (null == _parent)
+                InitializeDefaultPolicies();
 
             return this;
         }
@@ -276,7 +264,7 @@ namespace Unity
         /// <value>The parent container, or null if this container doesn't have one.</value>
         public IUnityContainer Parent
         {
-            get { return parent; }
+            get { return _parent; }
         }
 
         /// <summary>
@@ -290,7 +278,7 @@ namespace Unity
         {
             var child = new UnityContainer(this);
 
-            var childContext = new ExtensionContextImpl(child);
+            var childContext = child._extensionsContext;
             ChildContainerCreated(this, new ChildContainerCreatedEventArgs(childContext));
             return child;
         }
@@ -312,7 +300,7 @@ namespace Unity
                 return
                     from type in allRegisteredNames.Keys
                     from name in allRegisteredNames[type]
-                    select new ContainerRegistration(type, name, policies);
+                    select new ContainerRegistration(type, name, _policies);
             }
         }
     }

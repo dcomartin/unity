@@ -45,8 +45,7 @@ namespace ObjectBuilder2
         /// </summary>
         /// <param name="strategy">The strategy to add to the chain.</param>
         /// <param name="stage">The stage to add the strategy.</param>
-        public void Add(IBuilderStrategy strategy,
-                        TStageEnum stage)
+        public void Add(IBuilderStrategy strategy, TStageEnum stage)
         {
             lock (lockObject)
             {
@@ -59,10 +58,12 @@ namespace ObjectBuilder2
         /// </summary>
         /// <typeparam name="TStrategy">The <see cref="Type"/> of <see cref="IBuilderStrategy"/></typeparam>
         /// <param name="stage">The stage to add the strategy.</param>
-        public void AddNew<TStrategy>(TStageEnum stage)
+        public TStrategy AddNew<TStrategy>(TStageEnum stage)
             where TStrategy : IBuilderStrategy, new()
         {
-            Add(new TStrategy(), stage);
+            TStrategy instance = new TStrategy();
+            Add(instance, stage);
+            return instance;
         }
 
         /// <summary>
