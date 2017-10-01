@@ -2,11 +2,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Unity;
 using Unity.Container.Registration;
 using Unity.Properties;
-using Unity.Utility;
 
 namespace ObjectBuilder2
 {
@@ -18,7 +18,43 @@ namespace ObjectBuilder2
     /// </summary>
     public class LifetimeStrategy : BuilderUpStrategy, IRegisterTypes, IRegisterInstances
     {
-        private readonly object genericLifetimeManagerLock = new object();
+        private readonly object _genericLifetimeManagerLock = new object();
+
+
+        #region Registerations
+
+        public IEnumerable<IBuilderPolicy> OnRegisterType(Type from, Type to, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
+        {
+            if (null == lifetimeManager) return Enumerable.Empty<IBuilderPolicy>();
+
+            if (lifetimeManager.InUse)
+                throw new InvalidOperationException(Resources.LifetimeManagerInUse);
+
+            lifetimeManager.InUse = true;
+            if (lifetimeManager is IDisposable)
+                ContainerContext.Lifetime.Add(lifetimeManager);
+
+            return new[] { lifetimeManager };
+        }
+
+        public IEnumerable<IBuilderPolicy> OnRegisterInstance(Type type, string name, object instance, LifetimeManager lifetimeManager)
+        {
+            if (null == lifetimeManager) return Enumerable.Empty<IBuilderPolicy>();
+
+            if (lifetimeManager.InUse)
+                throw new InvalidOperationException(Resources.LifetimeManagerInUse);
+
+            lifetimeManager.InUse = true;
+            lifetimeManager.SetValue(instance);
+
+            if (lifetimeManager is IDisposable)
+                ContainerContext.Lifetime.Add(lifetimeManager);
+
+            return new[] { lifetimeManager };
+        }
+
+        #endregion
+
 
         #region BuilderStrategy
 
@@ -27,32 +63,32 @@ namespace ObjectBuilder2
         /// PreBuildUp method is called when the chain is being executed in the
         /// forward direction.
         /// </summary>
-        /// <param name="context">Context of the build operation.</param>
+        /// <param name="builderContext">Context of the build operation.</param>
         // FxCop suppression: Validation is done by Guard class
-        public override void PreBuildUp(IBuilderContext context)
+        public override void PreBuildUp(IBuilderContext builderContext)
         {
-            Guard.ArgumentNotNull(context, "context");
+            var context = builderContext ?? throw new ArgumentNullException(nameof(builderContext));
 
             if (context.Existing != null) return;
 
-            IPolicyList containingPolicyList;
-            ILifetimePolicy lifetimePolicy = GetLifetimePolicy(context, out containingPolicyList);
+            var lifetimePolicy = GetLifetimePolicy(context, out var containingPolicyList);
 
-            var scope = lifetimePolicy as IScopeLifetimePolicy;
-            if (null != scope &&  !ReferenceEquals(containingPolicyList, context.PersistentPolicies))
+            if (null == lifetimePolicy) return;
+
+            if (lifetimePolicy is IScopeLifetimePolicy scope &&  
+                !ReferenceEquals(containingPolicyList, context.PersistentPolicies))
             {
                 lifetimePolicy = scope.CreateScope() as ILifetimePolicy;
                 context.PersistentPolicies.Set(lifetimePolicy, context.BuildKey);
                 context.Lifetime.Add(lifetimePolicy);
             }
 
-            IRequiresRecovery recovery = lifetimePolicy as IRequiresRecovery;
-            if (recovery != null)
+            if (lifetimePolicy is IRequiresRecovery recovery)
             {
                 context.RecoveryStack.Add(recovery);
             }
 
-            object existing = lifetimePolicy.GetValue();
+            var existing = lifetimePolicy?.GetValue();
             if (existing != null)
             {
                 context.Existing = existing;
@@ -65,15 +101,12 @@ namespace ObjectBuilder2
         /// PostBuildUp method is called when the chain has finished the PreBuildUp
         /// phase and executes in reverse order from the PreBuildUp calls.
         /// </summary>
-        /// <param name="context">Context of the build operation.</param>
-        public override void PostBuildUp(IBuilderContext context)
+        /// <param name="builderContext">Context of the build operation.</param>
+        public override void PostBuildUp(IBuilderContext builderContext)
         {
-            Guard.ArgumentNotNull(context, "context");
-
-            IPolicyList containingPolicyList;
-
-            ILifetimePolicy lifetimePolicy = GetLifetimePolicy(context, out containingPolicyList);
-            lifetimePolicy.SetValue(context.Existing);
+            var context = builderContext ?? throw new ArgumentNullException(nameof(builderContext));
+            var lifetimePolicy = context.Policies.Get<ILifetimePolicy>(context.OriginalBuildKey);
+            lifetimePolicy?.SetValue(context.Existing);
         }
 
         private ILifetimePolicy GetLifetimePolicy(IBuilderContext context, out IPolicyList containingPolicyList)
@@ -82,12 +115,6 @@ namespace ObjectBuilder2
             if (policy == null && context.BuildKey.Type.GetTypeInfo().IsGenericType)
             {
                 policy = GetLifetimePolicyForGenericType(context, out containingPolicyList);
-            }
-
-            if (policy == null)
-            {
-                policy = TransientLifetimeManager.Instance;
-                context.PersistentPolicies.Set<ILifetimePolicy>(policy, context.BuildKey);
             }
 
             return policy;
@@ -110,7 +137,7 @@ namespace ObjectBuilder2
                 // multiple instances might be created, but only one instance will be used
                 ILifetimePolicy newLifetime = factoryPolicy.CreateLifetimePolicy();
 
-                lock (this.genericLifetimeManagerLock)
+                lock (this._genericLifetimeManagerLock)
                 {
                     // check whether the policy for closed-generic has been added since first checked
                     ILifetimePolicy lifetime = containingPolicyList.GetNoDefault<ILifetimePolicy>(context.BuildKey, false);
@@ -125,35 +152,6 @@ namespace ObjectBuilder2
             }
 
             return null;
-        }
-
-        #endregion
-
-
-        #region Registerations
-
-        public IEnumerable<IBuilderPolicy> OnRegisterType(Type from, Type to, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
-        {
-            if (lifetimeManager.InUse)
-                throw new InvalidOperationException(Resources.LifetimeManagerInUse);
-
-            return new[] { lifetimeManager ?? TransientLifetimeManager.Instance };
-        }
-
-        public IEnumerable<IBuilderPolicy> OnRegisterInstance(Type type, string name, object instance, LifetimeManager lifetimeManager)
-        {
-            var manager = lifetimeManager ?? new ContainerControlledLifetimeManager();
-
-            if (manager.InUse)
-                throw new InvalidOperationException(Resources.LifetimeManagerInUse);
-
-            manager.InUse = true;
-            manager.SetValue(instance);
-
-            if (manager is ContainerControlledLifetimeManager)
-                ContainerContext.Lifetime.Add(manager);
-
-            return new[] { manager };
         }
 
         #endregion

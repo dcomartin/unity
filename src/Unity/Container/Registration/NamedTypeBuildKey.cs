@@ -112,7 +112,8 @@ namespace ObjectBuilder2
         /// <returns>True if the values of the keys are the same, else false.</returns>
         public static bool operator ==(NamedTypeBuildKey left, NamedTypeBuildKey right)
         {
-            return (left?.GetHashCode() ?? 0) == (right?.GetHashCode() ?? 0);
+            return (left?.GetHashCode() ?? 0) == (right?.GetHashCode() ?? 0) &&
+                                   left?.Type == right?.Type;
         }
 
         /// <summary>
@@ -126,7 +127,7 @@ namespace ObjectBuilder2
         /// <returns>false if the values of the keys are the same, else true.</returns>
         public static bool operator !=(NamedTypeBuildKey left, NamedTypeBuildKey right)
         {
-            return (left?.GetHashCode() ?? 0) != (right?.GetHashCode() ?? 0);
+            return !(left == right);
         }
 
         /// <summary>

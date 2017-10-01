@@ -46,15 +46,7 @@ namespace Microsoft.Practices.Unity.Tests
             var o2 = child1.Resolve<TestClass>(); 
             Assert.AreNotSame(o1, o2);
         } 
-        
-        [TestMethod]        
-        public void ThenChildResolvesTheSameInstance()
-        {
-            var o1 = child1.Resolve<TestClass>(); 
-            var o2 = child1.Resolve<TestClass>();
-            Assert.AreSame(o1, o2);
-        } 
-        
+       
         [TestMethod]        
         public void ThenSiblingContainersResolveDifferentInstances()
         {

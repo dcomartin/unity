@@ -235,12 +235,12 @@ namespace ObjectBuilder2
         /// <returns>Created object.</returns>
         public object NewBuildUp(NamedTypeBuildKey newBuildKey)
         {
-            this.ChildContext =
-                new BuilderContext(this.Container, this.chain, lifetime, persistentPolicies, policies, newBuildKey, this.resolverOverrides);
+            ChildContext = new BuilderContext(Container, chain, lifetime, persistentPolicies, 
+                                              policies, newBuildKey, resolverOverrides);
 
-            object result = this.ChildContext.Strategies.ExecuteBuildUp(this.ChildContext);
+            var result = ChildContext.Strategies.ExecuteBuildUp(ChildContext);
 
-            this.ChildContext = null;
+            ChildContext = null;
 
             return result;
         }
@@ -251,22 +251,21 @@ namespace ObjectBuilder2
         /// of the build.
         /// </summary>
         /// <param name="newBuildKey">Key defining what to build up.</param>
-        /// <param name="childCustomizationBlock">A delegate that takes a <see cref="IBuilderContext"/>. This
+        /// <param name="action">A delegate that takes a <see cref="IBuilderContext"/>. This
         /// is invoked with the new child context before the build up process starts. This gives callers
         /// the opportunity to customize the context for the build process.</param>
         /// <returns>Created object.</returns>
-        public object NewBuildUp(NamedTypeBuildKey newBuildKey, Action<IBuilderContext> childCustomizationBlock)
+        public object NewBuildUp(NamedTypeBuildKey newBuildKey, Action<IBuilderContext> action)
         {
-            Guard.ArgumentNotNull(childCustomizationBlock, "childCustomizationBlock");
+            var childCustomizationBlock = action ?? throw new ArgumentNullException(nameof(action));
 
-            this.ChildContext =
-                new BuilderContext(this.Container, this.chain, lifetime, persistentPolicies, policies, newBuildKey, this.resolverOverrides);
+            ChildContext = new BuilderContext(Container, chain, lifetime, persistentPolicies, policies, newBuildKey, resolverOverrides);
 
-            childCustomizationBlock(this.ChildContext);
+            childCustomizationBlock(ChildContext);
 
-            object result = this.ChildContext.Strategies.ExecuteBuildUp(this.ChildContext);
+            var result = ChildContext.Strategies.ExecuteBuildUp(ChildContext);
 
-            this.ChildContext = null;
+            ChildContext = null;
 
             return result;
         }

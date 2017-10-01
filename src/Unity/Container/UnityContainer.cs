@@ -89,7 +89,7 @@ namespace Unity
         /// <returns>The retrieved object.</returns>
         public object Resolve(Type t, string name, params ResolverOverride[] resolverOverrides)
         {
-            return DoBuildUp(t, null, name, resolverOverrides);
+            return DoBuildUp(t, name, resolverOverrides);
         }
 
         /// <summary>
@@ -242,10 +242,10 @@ namespace Unity
             _registeredNames.Clear();
 
             // Restore defaults
-            Registering = OnRegister;
-            Registering += OnTypeRegistration;
-            RegisteringInstance = OnRegisterInstance;
-            RegisteringInstance += OnInstanceRegistration;
+            Registering = OnTypeRegistration;
+            Registering += OnRegister;                      // TODO: Obsolete
+            RegisteringInstance = OnInstanceRegistration;
+            RegisteringInstance += OnRegisterInstance;      // TODO: Obsolete
 
             if (null == _parent)
                 InitializeDefaultPolicies();
@@ -278,8 +278,8 @@ namespace Unity
         {
             var child = new UnityContainer(this);
 
-            var childContext = child._extensionsContext;
-            ChildContainerCreated(this, new ChildContainerCreatedEventArgs(childContext));
+            ChildContainerCreated(this, new ChildContainerCreatedEventArgs(child._extensionsContext));
+
             return child;
         }
 

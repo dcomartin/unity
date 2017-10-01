@@ -17,6 +17,7 @@ namespace Unity.Tests.ChildContainer
         {
             UnityContainer parent = new UnityContainer();
             parent.RegisterType<ITemporary, Temporary>();
+
             IUnityContainer child = parent.CreateChildContainer();
 
             ITemporary temp = child.Resolve<ITemporary>();

@@ -169,8 +169,8 @@ namespace Microsoft.Practices.Unity.Tests
         [TestMethod]
         public void ContainerSupportsSingletons()
         {
-            IUnityContainer container = new UnityContainer()
-                .RegisterType<ILogger, MockLogger>(new ContainerControlledLifetimeManager());
+            IUnityContainer container = new UnityContainer();
+            container.RegisterType<ILogger, MockLogger>(new ContainerControlledLifetimeManager());
 
             ILogger logger1 = container.Resolve<ILogger>();
             ILogger logger2 = container.Resolve<ILogger>();

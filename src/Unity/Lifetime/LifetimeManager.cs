@@ -18,7 +18,7 @@ namespace Unity
 
         // Get or set the InUse flag. Internal because it should only be touched from
         // the Register methods in the container.
-        internal virtual bool InUse { get; set; }
+        internal virtual bool InUse { get; set; } 
 
 
         #region ILifetimePolicy Members

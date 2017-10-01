@@ -3,6 +3,7 @@
 using System;
 using System.Globalization;
 using System.Reflection;
+using Unity;
 using Unity.Properties;
 using Unity.Utility;
 
@@ -15,6 +16,7 @@ namespace ObjectBuilder2
     public class GenericTypeBuildKeyMappingPolicy : IBuildKeyMappingPolicy
     {
         private readonly NamedTypeBuildKey destinationKey;
+        private readonly InjectionMember[] injectionMembers;
 
         /// <summary>
         /// Create a new <see cref="GenericTypeBuildKeyMappingPolicy"/> instance
@@ -22,7 +24,7 @@ namespace ObjectBuilder2
         /// </summary>
         /// <param name="destinationKey">Build key to map to. This must be or contain an open generic type.</param>
         // FxCop suppression: Validation is done by Guard class
-        public GenericTypeBuildKeyMappingPolicy(NamedTypeBuildKey destinationKey)
+        public GenericTypeBuildKeyMappingPolicy(NamedTypeBuildKey destinationKey, InjectionMember[] injectionMembers = null)
         {
             Guard.ArgumentNotNull(destinationKey, "destinationKey");
             if (!destinationKey.Type.GetTypeInfo().IsGenericTypeDefinition)
@@ -32,7 +34,9 @@ namespace ObjectBuilder2
                                   Resources.MustHaveOpenGenericType,
                                   destinationKey.Type.GetTypeInfo().Name));
             }
+
             this.destinationKey = destinationKey;
+            this.injectionMembers = injectionMembers;
         }
 
         /// <summary>

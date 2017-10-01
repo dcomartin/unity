@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Unity;
 using Unity.Container.Registration;
-using Unity.Utility;
 
 namespace ObjectBuilder2
 {
@@ -19,11 +18,10 @@ namespace ObjectBuilder2
         /// Looks for the <see cref="IBuildKeyMappingPolicy"/>
         /// and if found maps the build key for the current operation.
         /// </summary>
-        /// <param name="context">The context for the operation.</param>
-        public override void PreBuildUp(IBuilderContext context)
+        /// <param name="builderContext">The context for the operation.</param>
+        public override void PreBuildUp(IBuilderContext builderContext)
         {
-            Guard.ArgumentNotNull(context, "context");
-
+            var context = builderContext ?? throw new ArgumentNullException(nameof(builderContext));
             var policy = context.Policies.Get<IBuildKeyMappingPolicy>(context.BuildKey);
             if (policy == null) return;
 
@@ -36,23 +34,23 @@ namespace ObjectBuilder2
                 child.BuildKey = key;
             });
 
-            if (null != existing)
-            {
-                context.Existing = existing;
-                context.BuildComplete = true;
-            }
+            if (null == existing) return;
+
+            context.Existing = existing;
+            context.BuildComplete = true;
         }
 
 
         #region Registerations
 
-        public IEnumerable<IBuilderPolicy> OnRegisterType(Type from, Type to, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
+        public IEnumerable<IBuilderPolicy> OnRegisterType(Type typeFrom, Type typeTo, string name, LifetimeManager lifetimeManager, InjectionMember[] injectionMembers)
         {
-            // TODO: Replace with real implementation
-            return Enumerable.Empty<IBuilderPolicy>();
+            if (null == typeFrom && (null == injectionMembers || 0 == injectionMembers.Length))
+                return Enumerable.Empty<IBuilderPolicy>();
+
+            return new[] { (IBuilderPolicy)new BuildKeyMappingPolicy(new NamedTypeBuildKey(typeTo, name)) };
         }
 
         #endregion
-
     }
 }
